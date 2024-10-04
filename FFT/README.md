@@ -34,4 +34,18 @@ ____
 
 # USER API
 
+```
+//Делает простое прямое/обратное дискретное преобразование Фурье
+FFT::dft<dft_direction>(const std::vector<complex_t> poinst, std::vector<complex_t>& spectrum)
+```
 
+```
+//Делает дискретное преобразование фурье с разбиением на множители один из которых N1  
+//Бросит исключение, если длина преобразования не делится на N1
+FFT::fft_subdivided<dft_direction>(const std::vector<complex_t> poinst, std::vector<complex_t>& spectrum, size_t N1)
+```
+
+```
+//Делает рекурсивное разбиение на простые множители (2, 3, 5, 7) и множители-степени двойки (16, 32, 64)
+FFT::fft_recursive<dft_direction>(const std::vector<complex_t> poinst, std::vector<complex_t>& spectrum, size_t N1)
+```
