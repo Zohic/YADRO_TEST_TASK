@@ -2,6 +2,7 @@
 - [Теория](#Теория)
 - [Технические решение](#Технические-решения)
 - [API](#API)
+- [Примеры работы](#Примеры-работы)
  ____
  
  # Задание
@@ -94,3 +95,5 @@ std::vector<complex_t> FFTspectrum(points.size());
 ```
 
 Видим отсчёты с заданной амплитудой на заданных частотах симметричные относительно центральной частоты. Фазовый спектр анти-симметричен.
+
+<img style="display:inline; margin-right: 20px" width="50%" height="100%" src="images/amp.png"/><img width="50%" height="100%" style="display:inline" src="images/phas.png"/>
