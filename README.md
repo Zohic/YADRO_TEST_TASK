@@ -1,8 +1,3 @@
-# YADRO_TEST_TASK
-AME L1 Algorithms trainee
-
-```
-function test() {
-  console.log("notice the blank line before this function?");
-}
-```
+# Тестовое задание YADRO
+## AME-L1 algorithms trainee
+## Выполнен второй вариант
