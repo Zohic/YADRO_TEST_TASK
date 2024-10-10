@@ -2,7 +2,7 @@
 
 #define pi 3.14159265358979323846
 
-#define prec 1 // 1 for float, 2 for double
+#define prec 2 // 1 for float, 2 for double
 
 #if prec == 1
 #define number_t float

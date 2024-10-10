@@ -37,6 +37,16 @@ namespace YADRO_TEST {
 
 		void change_direction() const;
 		void swap_dimensions() const;
+		void print(const complex_t* ptr) const {
+			for (int i = 0; i < _count; ++i) {
+				for (int j = 0; j < _length; j++) {
+					printf("(%4.3f, %4.3f) ", get(ptr, i, j).real(), get(ptr, i, j).imag());
+				}
+				printf("\n");
+			}
+				
+
+		}
 
 		size_t count() const;
 		size_t length() const;
