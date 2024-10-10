@@ -1,8 +1,5 @@
 #pragma once
 #include "matrix_vecor_mapper.hpp"
-#include <future>
-#include <atomic>
-#include <thread>
 
 #define complex_mult_real(a, b) a.real() * b.real() - a.imag() * b.imag()
 #define complex_mult_imag(a, b) a.real() * b.imag() + a.imag() * b.real()
@@ -17,6 +14,17 @@ inline constexpr uint32_t PREALLOC_SIZE = 1 << 15; // of complex<double>
 #define ARRAY_DFT_THREADS 1
 
 #define ARRAY_DFT_METHOD ARRAY_DFT_THREADS
+
+#if ARRAY_DFT_METHOD == ARRAY_DFT_ASYNC
+#include <future>
+#elif ARRAY_DFT_METHOD == ARRAY_DFT_THREADS
+#include <mutex>
+#include <atomic>
+#include <thread>
+#elif
+static_assert(false, "ARRAY_DFT_METHOD must be set to one of options");
+#endif
+
 
 namespace YADRO_TEST {
 	class FFT {
