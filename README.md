@@ -7,10 +7,10 @@ ____
 
 Была добавлена система сборки CMake 3.18 + Ninja  
 И внесены изменения, чтобы собиралось с GCC   
-В папке scripts скрипты для сборки. В них уже указаны необходимые параметры  
+В папке scripts скрипты для сборки. В них уже указаны необходимые параметры, но можно при желании поменять
 
 ``COMPILER_OPTION=clang|gcc``    
 ``*FLOAT_PREC=1|2``  
-``PREALLOC_SIZE=(c++ uint32_t число) (по умолчанию is 1<<15)``  
+``PREALLOC_SIZE=(c++ uint32_t число) (по умолчанию 1<<15)``  
 ``*ARRAY_DFT_METHOD=ARRAY_DFT_ASYNC|ARRAY_DFT_THREADS``  
 ``NUM_DFT_THREADS=(c++ uint8_t число) (по умолчанию 4)``  
