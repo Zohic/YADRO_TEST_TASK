@@ -1,8 +1,11 @@
 #pragma once
+#include <stdint.h>
+#include <exception>
 
 #define pi 3.14159265358979323846
 
-#define prec 2 // 1 for float, 2 for double
+//must be set from build system
+//#define prec 1
 
 #if prec == 1
 #define number_t float

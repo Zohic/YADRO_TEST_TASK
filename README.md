@@ -2,8 +2,15 @@
 специализация AME-L1 algorithms trainee 
 <br/>
 Выполнен второй вариант
-____
 Подробнее в папке [FFT](./FFT)
 ____
-После дедлайна в репозиторий были внесены дополнения  
-[Версия репозитория в день дедлайна доступна по ссылке](https://github.com/Zohic/YADRO_TEST_TASK/tree/9ceff7c44d50776ed6da2e76bce69d9ac781fae1)
+
+Была добавлена система сборки CMake 3.18 + Ninja
+И внесены изменения, чтобы собиралось с GCC   
+В папке scripts скрипты для сборки. В них уже указаны необходимые параметры  
+
+``COMPILER_OPTION=clang|gcc``    
+``*FLOAT_PREC=1|2``  
+``PREALLOC_SIZE=(c++ uint32_t число) (по умолчанию is 1<<15)``  
+``*ARRAY_DFT_METHOD=ARRAY_DFT_ASYNC|ARRAY_DFT_THREADS``  
+``NUM_DFT_THREADS=(c++ uint8_t число) (по умолчанию 4)``  

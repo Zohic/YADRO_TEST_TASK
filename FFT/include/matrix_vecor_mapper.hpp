@@ -1,5 +1,5 @@
 #pragma once
-#include "config.hpp"
+#include <config.hpp>
 #include <vector>
 
 namespace YADRO_TEST {
@@ -18,7 +18,7 @@ namespace YADRO_TEST {
 		mutable vector_map_direction _dir;
 
 		static getter getters[2];
-		static const_getter ñ_getters[2];
+		static const_getter c_getters[2];
 
 		complex_t& getLine(complex_t* ptr, size_t sequence_index, size_t element_index);
 		complex_t& getColumn(complex_t* ptr, size_t sequence_index, size_t element_index);

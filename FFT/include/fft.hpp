@@ -1,28 +1,38 @@
 #pragma once
-#include "matrix_vecor_mapper.hpp"
+#include <matrix_vecor_mapper.hpp>
+#include <cstring>
 
 #define complex_mult_real(a, b) a.real() * b.real() - a.imag() * b.imag()
 #define complex_mult_imag(a, b) a.real() * b.imag() + a.imag() * b.real()
 #define complex_conj_mult_real(a, b) a.real() * b.real() + a.imag() * b.imag() //b is conjugated
 #define complex_conj_mult_imag(a, b) a.imag() * b.real() - a.real() * b.imag() //b is conjugated
 
-inline constexpr uint8_t NUM_DFT_THREADS = 4;
-inline constexpr uint32_t PREALLOC_SIZE = 1 << 15; // of complex<double>
+//must be set from build system
+//#define PREALLOC_SIZE_DEF 1<<15 
 
+inline constexpr uint32_t PREALLOC_SIZE = PREALLOC_SIZE_DEF; // of complex<double>
+
+#ifdef NUM_DFT_THREADS_DEF //set from build system
+	inline constexpr uint8_t NUM_DFT_THREADS = NUM_DFT_THREADS_DEF;
+#else
+	static_assert(false, "NUM_DFT_THREADS_DEF must be specified");
+#endif
 
 #define ARRAY_DFT_ASYNC 0
 #define ARRAY_DFT_THREADS 1
 
-#define ARRAY_DFT_METHOD ARRAY_DFT_THREADS
+//must be set from build system
+//#define ARRAY_DFT_METHOD ARRAY_DFT_THREADS 
 
 #if ARRAY_DFT_METHOD == ARRAY_DFT_ASYNC
-#include <future>
+	#include <future>
 #elif ARRAY_DFT_METHOD == ARRAY_DFT_THREADS
-#include <mutex>
-#include <atomic>
-#include <thread>
+	#include <mutex>
+	#include <atomic>
+	#include <condition_variable>
+	#include <thread>
 #elif
-static_assert(false, "ARRAY_DFT_METHOD must be set to one of options");
+	static_assert(false, "ARRAY_DFT_METHOD must be set to one of options");
 #endif
 
 
@@ -77,7 +87,7 @@ namespace YADRO_TEST {
 					//printf("began computing...\n");
 				}
 				else
-					throw std::exception("not all threads finished last time?");
+					throw std::runtime_error("not all threads finished last time?");
 				
 				while (_job_counter.load() < num_threads) {
 					//printf("now done %i\n", _job_counter.operator unsigned char());
@@ -115,7 +125,7 @@ namespace YADRO_TEST {
 							//printf("\tthread %zu done!\n", std::this_thread::get_id());
 						}
 					}
-					catch (std::exception& e) {
+					catch (std::runtime_error& e) {
 						printf("THREAD ERROR: %s\n", e.what());
 					}
 					});
@@ -151,13 +161,20 @@ namespace YADRO_TEST {
 
 			complex_t* get(size_t N) {
 				if (_prealloc_count + N >= PREALLOC_SIZE)
-					throw std::exception("out of preallocated memory");
-
-				//printf("alloceted %zu complex\n", N);
+				{
+					if(N >= PREALLOC_SIZE)
+						throw std::runtime_error("out of preallocated memory");
+					else{
+						reset();
+						return get(N);
+					}
+				}else{
+					//printf("alloceted %zu complex\n", N);
 
 				size_t prev = _prealloc_count;
 				_prealloc_count += N;
 				return _prealloc + prev;
+				}
 			}
 
 			void reset() {
@@ -171,9 +188,197 @@ namespace YADRO_TEST {
 
 		static void fill_vector_map(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper& src_map, matrix_vector_mapper& dst_map);
 		DFT_METHOD mapped_dft(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper& src_map, matrix_vector_mapper& dst_map);
-		static void fft_recursive_base(complex_t* src_ptr, complex_t* dst_ptr, const size_t N) {
+		static void fft_recursive_base(complex_t* src_ptr, complex_t* dst_ptr, const size_t N);
+	public:
+		//It is assumed that memory for the arrays is preallocated and dst is zero initialized
+		DFT_METHOD dft(const complex_t* const src_ptr, complex_t* const dst_ptr, const size_t N);
+		//It is assumed that memory for the arrays is preallocated and dst is zero initialized
+		DFT_METHOD fft_subdivided(const complex_t* const src_ptr, complex_t* const dst_ptr, const size_t N, const size_t N1);
+		//It is assumed that memory for the arrays is preallocated and dst is zero initialized
+		DFT_METHOD fft_recursive(complex_t* src_ptr, complex_t* dst_ptr, const size_t N);
+
+		DFT_METHOD dft(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum);
+		DFT_METHOD fft_subdivided(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum, const size_t N1);
+		DFT_METHOD fft_recursive(std::vector<complex_t>& points, std::vector<complex_t>& spectrum);
+	};
+
+#if ARRAY_DFT_METHOD == ARRAY_DFT_ASYNC
+	template<FFT::dft_direction direction> void FFT::fill_dft_separate(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper* src_map, matrix_vector_mapper* dst_map, uint32_t row_ind) {
+		const number_t m2pi_over_N = -d_pi / src_map->length();
+		for (size_t f = 0; f < src_map->length(); f++) {
+			complex_t& elem = dst_map->get(dst_ptr, row_ind, f);
+			for (size_t n = 0; n < src_map->length(); n++) {
+				const number_t w = n * f * m2pi_over_N;
+				const complex_t e = { cos_f(w), sin_f(w) };
+
+				if constexpr (direction == FFT::dft_direction::forward) {
+					elem.real(elem.real() + complex_mult_real(src_map->get(src_ptr, row_ind, n), e));
+					elem.imag(elem.imag() + complex_mult_imag(src_map->get(src_ptr, row_ind, n), e));
+				}
+				else {
+					elem.real(elem.real() + complex_conj_mult_real(src_map->get(src_ptr, row_ind, n), e));
+					elem.imag(elem.imag() + complex_conj_mult_imag(src_map->get(src_ptr, row_ind, n), e));
+				}
+			}
+			if constexpr (direction == FFT::dft_direction::inverse) {
+				elem.real(elem.real() / src_map->length());
+				elem.imag(-elem.imag() / src_map->length());
+				}
+			}
+		}
+
+	template<FFT::dft_direction direction> void FFT::mapped_dft(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper& src_map, matrix_vector_mapper& dst_map) {
+		std::future<void> futures[NUM_DFT_THREADS];
+		int32_t current_row = src_map.count() - 1;
+
+		while (current_row >= 0) {
+			//all threads should take about same time, since they doing the same job for same amount of data
+			//then no need to use every vacant thread upon completion just wait while all finish
+			uint8_t used_threads = 0;
+			uint32_t a = current_row + 1;
+			uint32_t b = (uint32_t)NUM_DFT_THREADS;
+			uint32_t minab = std::min(a, b);
+			for (int i = 0; i < minab; i++) {
+				futures[i] = std::async(std::launch::async, FFT::fill_dft_separate<direction>, src_ptr, dst_ptr, &src_map, &dst_map, current_row);
+				current_row -= 1;
+				used_threads++;
+			}
+
+			for (int i = 0; i < used_threads; i++) {
+				futures[i].wait();
+			}
+		}
+	}
+#elif ARRAY_DFT_METHOD == ARRAY_DFT_THREADS
+	template<FFT::dft_direction direction> void FFT::fill_dft_some(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper* src_map, matrix_vector_mapper* dst_map, uint32_t from_row, uint32_t to_row) {
+		const number_t m2pi_over_N = -d_pi / src_map->length();
+
+		for (uint32_t c = from_row; c < to_row; c++)
+			for (size_t f = 0; f < src_map->length(); f++) {
+
+				complex_t& elem = dst_map->get(dst_ptr, c, f);
+
+				for (size_t n = 0; n < src_map->length(); n++) {
+					const number_t w = n * f * m2pi_over_N;
+					const complex_t e = { cos_f(w), sin_f(w) };
+
+					if constexpr (direction == FFT::dft_direction::forward) {
+						elem.real(elem.real() + complex_mult_real(src_map->get(src_ptr, c, n), e));
+						elem.imag(elem.imag() + complex_mult_imag(src_map->get(src_ptr, c, n), e));
+					}
+					else {
+						elem.real(elem.real() + complex_conj_mult_real(src_map->get(src_ptr, c, n), e));
+						elem.imag(elem.imag() + complex_conj_mult_imag(src_map->get(src_ptr, c, n), e));
+					}
+				}
+				if constexpr (direction == FFT::dft_direction::inverse) {
+					elem.real(elem.real() / src_map->length());
+					elem.imag(-elem.imag() / src_map->length());
+				}
+			}
+	}
+	template<FFT::dft_direction direction> void FFT::mapped_dft(const complex_t * src_ptr, complex_t * dst_ptr, const matrix_vector_mapper & src_map, matrix_vector_mapper & dst_map) {
+		//synchronous operation. will stop current flow until finished
+		FFT::_thread_queue.compute_parallel<direction>(src_ptr, dst_ptr, &src_map, &dst_map);
+	}
+#endif // ARRAY_DFT_METHOD
+	
+	void FFT::fill_vector_map(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper& src_map, matrix_vector_mapper& dst_map) {
+		for (int i = 0; i < src_map.count(); i++)
+			for (int j = 0; j < src_map.length(); j++)
+				dst_map.get(dst_ptr, i, j) = src_map.get(src_ptr, i, j);
+	}
+
+	template<FFT::dft_direction direction> void FFT::dft(const complex_t* const src_ptr, complex_t* const dst_ptr, const size_t N) {
+		if (src_ptr == nullptr || dst_ptr == nullptr)
+			throw std::runtime_error("null pointer received");
+
+		const number_t m_pi_over_n = -d_pi / N;
+
+		for (uint32_t f = 0; f < N; f++) {
+			complex_t& elem = dst_ptr[f];
+			for (uint32_t n = 0; n < N; n++) {
+				const number_t w = m_pi_over_n * n * f;
+				const complex_t e = { cos_f(w), sin_f(w) };
+
+				if constexpr (direction == dft_direction::inverse) {
+					elem.real(elem.real() + complex_conj_mult_real(src_ptr[n], e));
+					elem.imag(elem.imag() + complex_conj_mult_imag(src_ptr[n], e));
+				}
+				else {
+					elem.real(elem.real() + complex_mult_real(src_ptr[n], e));
+					elem.imag(elem.imag() + complex_mult_imag(src_ptr[n], e));
+				}
+			}
+			if constexpr (direction == dft_direction::inverse) {
+				elem.real(dst_ptr[f].real() / N);
+				elem.imag(dst_ptr[f].imag() / N);
+			}
+		}
+	}
+	template<FFT::dft_direction direction> void FFT::dft(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum) {
+		spectrum.resize(points.size());
+		dft<direction>(points.data(), spectrum.data(), points.size());
+	}
+
+	template<FFT::dft_direction direction> void FFT::fft_subdivided(const complex_t* const points, complex_t* const dst_ptr, const size_t N, const size_t N1) {
+		if (points == nullptr || dst_ptr == nullptr)
+			throw std::runtime_error("null pointer received");
+		if (N % N1 != 0)
+			throw std::runtime_error("number of points must be divisible by N1");
+
+		const uint32_t N2 = N / N1;
+
+		//complex_t* temp = new complex_t[N];
+		complex_t* temp = FFT::_prealloc.get(N);
+
+		const matrix_vector_mapper pointsMap(N, N1, N2, vector_map_direction::crosswise);
+		matrix_vector_mapper tempMap(        N, N1, N2, vector_map_direction::lengthwise);
+		matrix_vector_mapper resultMap(      N, N2, N1, vector_map_direction::crosswise);
+
+		mapped_dft<direction>(points, temp, pointsMap, tempMap);
+
+		tempMap.swap_dimensions();
+		tempMap.change_direction();
+
+		const number_t m2pi_over_N = -d_pi / N;
+		complex_t temp_val;
+
+		for (uint32_t el = 0; el < N1; el++) {
+			for (uint32_t seq = 0; seq < N2; seq++) {
+				const number_t w = m2pi_over_N * seq * el;
+				const complex_t e = { cos_f(w), sin_f(w) };
+
+				temp_val = tempMap.get(temp, seq, el);
+
+				tempMap.get(temp, seq, el).real(complex_mult_real(temp_val, e));
+				tempMap.get(temp, seq, el).imag(complex_mult_imag(temp_val, e));
+			}
+		}
+
+		mapped_dft<FFT::dft_direction::forward>(temp, dst_ptr, tempMap, resultMap);
+
+		if constexpr (direction == dft_direction::inverse) {
+			const number_t k = 1.0 / N * N2;
+			for (size_t p = 0; p < N; p++) {
+				dst_ptr[p].real(dst_ptr[p].real() * k);
+				dst_ptr[p].imag(-dst_ptr[p].imag() * k);
+			}
+
+		}
+		FFT::_prealloc.reset();
+	}
+	template<FFT::dft_direction direction> void FFT::fft_subdivided(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum, const size_t N1) {
+		if (points.size() % N1 != 0)
+			throw std::runtime_error("number of points must be divisible by N1");
+		spectrum.resize(points.size());
+
+		fft_subdivided<direction>(points.data(), spectrum.data(), points.size(), N1);
+	}
+
+	void FFT::fft_recursive_base(complex_t* src_ptr, complex_t* dst_ptr, const size_t N) {
 			if (src_ptr == nullptr || dst_ptr == nullptr)
-				throw std::exception("null pointer received");
+				throw std::runtime_error("null pointer received");
 
 			size_t N1 = 1;
 
@@ -233,8 +438,8 @@ namespace YADRO_TEST {
 
 							temp_val = resultMap.get(dst_ptr, seq, el);
 
-							resultMap.get(dst_ptr, seq, el)._Val[0] = complex_mult_real(temp_val, e);
-							resultMap.get(dst_ptr, seq, el)._Val[1] = complex_mult_imag(temp_val, e);
+							resultMap.get(dst_ptr, seq, el).real(complex_mult_real(temp_val, e));
+							resultMap.get(dst_ptr, seq, el).imag(complex_mult_imag(temp_val, e));
 						}
 					}
 
@@ -247,196 +452,10 @@ namespace YADRO_TEST {
 				}
 			}
 		}
-	public:
-		//It is assumed that memory for the arrays is preallocated and dst is zero initialized
-		DFT_METHOD dft(const complex_t* const src_ptr, complex_t* const dst_ptr, const size_t N);
-		//It is assumed that memory for the arrays is preallocated and dst is zero initialized
-		DFT_METHOD fft_subdivided(const complex_t* const src_ptr, complex_t* const dst_ptr, const size_t N, const size_t N1);
-		//It is assumed that memory for the arrays is preallocated and dst is zero initialized
-		DFT_METHOD fft_recursive(complex_t* src_ptr, complex_t* dst_ptr, const size_t N);
 
-		DFT_METHOD dft(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum);
-		DFT_METHOD fft_subdivided(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum, const size_t N1);
-		DFT_METHOD fft_recursive(std::vector<complex_t>& points, std::vector<complex_t>& spectrum);
-	};
-
-#if ARRAY_DFT_METHOD == ARRAY_DFT_ASYNC
-	DFT_METHOD FFT::fill_dft_separate(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper* src_map, matrix_vector_mapper* dst_map, uint32_t row_ind) {
-		const number_t m2pi_over_N = -d_pi / src_map->length();
-		for (size_t f = 0; f < src_map->length(); f++) {
-			complex_t& elem = dst_map->get(dst_ptr, row_ind, f);
-			for (size_t n = 0; n < src_map->length(); n++) {
-				const number_t w = n * f * m2pi_over_N;
-				const complex_t e = { cos_f(w), sin_f(w) };
-
-				if constexpr (direction == FFT::dft_direction::forward) {
-					elem._Val[0] += complex_mult_real(src_map->get(src_ptr, row_ind, n), e);
-					elem._Val[1] += complex_mult_imag(src_map->get(src_ptr, row_ind, n), e);
-				}
-				else {
-					elem._Val[0] += complex_conj_mult_real(src_map->get(src_ptr, row_ind, n), e);
-					elem._Val[1] += complex_conj_mult_imag(src_map->get(src_ptr, row_ind, n), e);
-				}
-			}
-			if constexpr (direction == FFT::dft_direction::inverse) {
-				elem._Val[0] = elem._Val[0] / src_map->length();
-				elem._Val[1] = -elem._Val[1] / src_map->length();
-				}
-			}
-		}
-
-	DFT_METHOD FFT::mapped_dft(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper& src_map, matrix_vector_mapper& dst_map) {
-		std::future<void> futures[NUM_DFT_THREADS];
-		int32_t current_row = src_map.count() - 1;
-
-		while (current_row >= 0) {
-			//all threads should take about same time, since they doing the same job for same amount of data
-			//then no need to use every vacant thread upon completion just wait while all finish
-			uint8_t used_threads = 0;
-			uint32_t a = current_row + 1;
-			uint32_t b = (uint32_t)NUM_DFT_THREADS;
-			uint32_t minab = std::min(a, b);
-			for (int i = 0; i < minab; i++) {
-				futures[i] = std::async(std::launch::async, FFT::fill_dft_separate<direction>, src_ptr, dst_ptr, &src_map, &dst_map, current_row);
-				current_row -= 1;
-				used_threads++;
-			}
-
-			for (int i = 0; i < used_threads; i++) {
-				futures[i].wait();
-			}
-		}
-	}
-#elif ARRAY_DFT_METHOD == ARRAY_DFT_THREADS
-	DFT_METHOD FFT::fill_dft_some(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper* src_map, matrix_vector_mapper* dst_map, uint32_t from_row, uint32_t to_row) {
-		const number_t m2pi_over_N = -d_pi / src_map->length();
-
-		for (uint32_t c = from_row; c < to_row; c++)
-			for (size_t f = 0; f < src_map->length(); f++) {
-
-				complex_t& elem = dst_map->get(dst_ptr, c, f);
-
-				for (size_t n = 0; n < src_map->length(); n++) {
-					const number_t w = n * f * m2pi_over_N;
-					const complex_t e = { cos_f(w), sin_f(w) };
-
-					if constexpr (direction == FFT::dft_direction::forward) {
-						elem._Val[0] += complex_mult_real(src_map->get(src_ptr, c, n), e);
-						elem._Val[1] += complex_mult_imag(src_map->get(src_ptr, c, n), e);
-					}
-					else {
-						elem._Val[0] += complex_conj_mult_real(src_map->get(src_ptr, c, n), e);
-						elem._Val[1] += complex_conj_mult_imag(src_map->get(src_ptr, c, n), e);
-					}
-				}
-				if constexpr (direction == FFT::dft_direction::inverse) {
-					elem._Val[0] = elem._Val[0] / src_map->length();
-					elem._Val[1] = -elem._Val[1] / src_map->length();
-				}
-			}
-	}
-	DFT_METHOD FFT::mapped_dft(const complex_t * src_ptr, complex_t * dst_ptr, const matrix_vector_mapper & src_map, matrix_vector_mapper & dst_map) {
-		//synchronous operation. will stop current flow until finished
-		FFT::_thread_queue.compute_parallel<direction>(src_ptr, dst_ptr, &src_map, &dst_map);
-	}
-#endif // ARRAY_DFT_METHOD
-	
-	void FFT::fill_vector_map(const complex_t* src_ptr, complex_t* dst_ptr, const matrix_vector_mapper& src_map, matrix_vector_mapper& dst_map) {
-		for (int i = 0; i < src_map.count(); i++)
-			for (int j = 0; j < src_map.length(); j++)
-				dst_map.get(dst_ptr, i, j) = src_map.get(src_ptr, i, j);
-	}
-
-	DFT_METHOD FFT::dft(const complex_t* const src_ptr, complex_t* const dst_ptr, const size_t N) {
+	template<FFT::dft_direction direction> void FFT::fft_recursive(complex_t* src_ptr, complex_t* dst_ptr, const size_t N) {
 		if (src_ptr == nullptr || dst_ptr == nullptr)
-			throw std::exception("null pointer received");
-
-		const number_t m_pi_over_n = -d_pi / N;
-
-		for (uint32_t f = 0; f < N; f++) {
-			complex_t& elem = dst_ptr[f];
-			for (uint32_t n = 0; n < N; n++) {
-				const number_t w = m_pi_over_n * n * f;
-				const complex_t e = { cos_f(w), sin_f(w) };
-
-				if constexpr (direction == dft_direction::inverse) {
-					elem._Val[0] += complex_conj_mult_real(src_ptr[n], e);
-					elem._Val[1] += complex_conj_mult_imag(src_ptr[n], e);
-				}
-				else {
-					elem._Val[0] += complex_mult_real(src_ptr[n], e);
-					elem._Val[1] += complex_mult_imag(src_ptr[n], e);
-				}
-			}
-			if constexpr (direction == dft_direction::inverse) {
-				elem._Val[0] = dst_ptr[f]._Val[0] / N;
-				elem._Val[1] = dst_ptr[f]._Val[1] / N;
-			}
-		}
-	}
-	DFT_METHOD FFT::dft(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum) {
-		spectrum.resize(points.size());
-		dft<direction>(points.data(), spectrum.data(), points.size());
-	}
-
-	DFT_METHOD FFT::fft_subdivided(const complex_t* const points, complex_t* const dst_ptr, const size_t N, const size_t N1) {
-		if (points == nullptr || dst_ptr == nullptr)
-			throw std::exception("null pointer received");
-		if (N % N1 != 0)
-			throw std::exception("number of points must be divisible by N1");
-
-		const uint32_t N2 = N / N1;
-
-		//complex_t* temp = new complex_t[N];
-		complex_t* temp = FFT::_prealloc.get(N);
-
-		const matrix_vector_mapper pointsMap(N, N1, N2, vector_map_direction::crosswise);
-		matrix_vector_mapper tempMap(        N, N1, N2, vector_map_direction::lengthwise);
-		matrix_vector_mapper resultMap(      N, N2, N1, vector_map_direction::crosswise);
-
-		mapped_dft<direction>(points, temp, pointsMap, tempMap);
-
-		tempMap.swap_dimensions();
-		tempMap.change_direction();
-
-		const number_t m2pi_over_N = -d_pi / N;
-		complex_t temp_val;
-
-		for (uint32_t el = 0; el < N1; el++) {
-			for (uint32_t seq = 0; seq < N2; seq++) {
-				const number_t w = m2pi_over_N * seq * el;
-				const complex_t e = { cos_f(w), sin_f(w) };
-
-				temp_val = tempMap.get(temp, seq, el);
-
-				tempMap.get(temp, seq, el)._Val[0] = complex_mult_real(temp_val, e);
-				tempMap.get(temp, seq, el)._Val[1] = complex_mult_imag(temp_val, e);
-			}
-		}
-
-		mapped_dft<FFT::dft_direction::forward>(temp, dst_ptr, tempMap, resultMap);
-
-		if constexpr (direction == dft_direction::inverse) {
-			const number_t k = 1.0 / N * N2;
-			for (size_t p = 0; p < N; p++) {
-				dst_ptr[p]._Val[0] = dst_ptr[p]._Val[0] * k;
-				dst_ptr[p]._Val[1] = -dst_ptr[p]._Val[1] * k;
-			}
-
-		}
-		FFT::_prealloc.reset();
-	}
-	DFT_METHOD FFT::fft_subdivided(const std::vector<complex_t>& points, std::vector<complex_t>& spectrum, const size_t N1) {
-		if (points.size() % N1 != 0)
-			throw std::exception("number of points must be divisible by N1");
-		spectrum.resize(points.size());
-
-		fft_subdivided<direction>(points.data(), spectrum.data(), points.size(), N1);
-	}
-
-	DFT_METHOD FFT::fft_recursive(complex_t* src_ptr, complex_t* dst_ptr, const size_t N) {
-		if (src_ptr == nullptr || dst_ptr == nullptr)
-			throw std::exception("null pointer received");
+			throw std::runtime_error("null pointer received");
 
 		if constexpr (direction == dft_direction::inverse) {
 			complex_t* temp = FFT::_prealloc.get(N);
@@ -464,7 +483,7 @@ namespace YADRO_TEST {
 		FFT::_prealloc.reset();
 
 	}
-	DFT_METHOD FFT::fft_recursive(std::vector<complex_t>& points, std::vector<complex_t>& spectrum) {
+	template<FFT::dft_direction direction> void FFT::fft_recursive(std::vector<complex_t>& points, std::vector<complex_t>& spectrum) {
 		spectrum.resize(points.size());
 		fft_recursive<direction>(points.data(), spectrum.data(), points.size());
 	}
